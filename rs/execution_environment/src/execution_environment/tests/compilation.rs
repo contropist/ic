@@ -3,7 +3,7 @@ mod execution_tests {
 
     use ic_error_types::ErrorCode;
     use ic_replicated_state::{
-        canister_state::execution_state::{WasmBinary, WasmMetadata},
+        canister_state::execution_state::{WasmBinary, WasmExecutionMode, WasmMetadata},
         ExecutionState, ExportedFunctions, Memory,
     };
     use ic_test_utilities_execution_environment::{wat_compilation_cost, ExecutionTestBuilder};
@@ -20,6 +20,29 @@ mod execution_tests {
             (func $go (call $msg_reply))
             (export "canister_update go" (func $go))
         )"#;
+
+    #[test]
+    fn compilation_of_repeated_instructions_succeeds() {
+        let mut test = ExecutionTestBuilder::new().build();
+        let wat = format!(
+            r#"
+            (module
+                (func (result i64)
+                    (i64.const 1)
+                    {}
+                )
+                (func)
+            )"#,
+            "(i64.add (i64.const 1))".repeat(20_000)
+        );
+        test.canister_from_wat(wat).unwrap();
+        let largest_function_metric = fetch_histogram_stats(
+            test.metrics_registry(),
+            "hypervisor_largest_function_instruction_count",
+        )
+        .unwrap();
+        assert_eq!(largest_function_metric.count, 1);
+    }
 
     #[test]
     fn compilation_metrics_are_recorded_during_installation() {
@@ -237,9 +260,11 @@ mod execution_tests {
         assert_eq!(
             test.canister_state(canister_id2).system_state.balance(),
             initial_balance
-                - test
-                    .cycles_account_manager()
-                    .execution_cost(wat_compilation_cost(WAT_EMPTY), test.subnet_size())
+                - test.cycles_account_manager().execution_cost(
+                    wat_compilation_cost(WAT_EMPTY),
+                    test.subnet_size(),
+                    WasmExecutionMode::Wasm32 // Does not matter if it is Wasm64 or Wasm32 for this test.
+                )
         );
     }
 
@@ -456,7 +481,7 @@ mod execution_tests {
         assert!(canister_state.execution_state.is_none());
         canister_state.execution_state = Some(ExecutionState::new(
             PathBuf::new(),
-            // Without the '\x00asm' prefix, the check for wasm code lengt will fail.
+            // Without the '\x00asm' prefix, the check for wasm code length will fail.
             WasmBinary::new(CanisterModule::new(b"invalid wasm".to_vec())),
             ExportedFunctions::new(
                 vec![WasmMethod::Update("go".to_string())]
@@ -534,7 +559,7 @@ mod state_machine_tests {
             expected_compilation_instructions.get() as f64,
         );
 
-        // Installing another canister with the same WASM doesn't take instructions.
+        // Installing another canister with the same Wasm doesn't take instructions.
         let _canister_id2 = env.install_canister_wat(TEST_CANISTER, vec![], None);
         assert_eq!(
             env.subnet_message_instructions(),
@@ -560,7 +585,7 @@ mod state_machine_tests {
             expected_compilation_instructions,
         );
 
-        // Installing another canister with the same WASM uses instructions because
+        // Installing another canister with the same Wasm uses instructions because
         // there was a checkpoint since the last install.
         let _canister_id2 = env.install_canister_wat(TEST_CANISTER, vec![], None);
         assert_eq!(
