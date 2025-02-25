@@ -1,16 +1,21 @@
 [package]
 name = "xnet-test"
-version = "0.8.0"
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+description.workspace = true
+documentation.workspace = true
 
 [[bin]]
 name = "xnet-test-canister"
 path = "src/main.rs"
 
 [dependencies]
-ic-crypto-getrandom-for-wasm = { path = "../../crypto/getrandom_for_wasm" }
-candid = "0.8.1"
-dfn_core = { path = "../dfn_core" }
-rand = "0.8"
+candid = { workspace = true }
+futures = { workspace = true }
+ic-cdk = { git = "https://github.com/dfinity/cdk-rs", rev = "4e287ce51636b0e70768c193da38d2fc5324ea15" }
+ic-cdk-macros = { git = "https://github.com/dfinity/cdk-rs", rev = "4e287ce51636b0e70768c193da38d2fc5324ea15" }
+rand = { workspace = true }
 rand_pcg = "0.3"
-serde = "1.0"
+serde = { workspace = true }
+serde_bytes = { workspace = true }

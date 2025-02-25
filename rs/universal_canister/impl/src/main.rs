@@ -212,6 +212,7 @@ fn eval(ops_bytes: OpsBytes) {
             Ops::DebugPrint => api::print(&stack.pop_blob()),
             Ops::Trap => api::trap_with_blob(&stack.pop_blob()),
             Ops::SetGlobal => set_global(stack.pop_blob()),
+            Ops::AppendGlobal => append_global(stack.pop_blob()),
             Ops::GetGlobal => stack.push_blob(get_global()),
             Ops::BadPrint => api::bad_print(),
             Ops::SetPreUpgrade => set_pre_upgrade(stack.pop_blob()),
@@ -378,6 +379,11 @@ fn eval(ops_bytes: OpsBytes) {
                 let amount = stack.pop_int64();
                 stack.push_int64(api::mint_cycles(amount));
             }
+            Ops::MintCycles128 => {
+                let amount_low = stack.pop_int64();
+                let amount_high = stack.pop_int64();
+                stack.push_blob(api::mint_cycles128(amount_high, amount_low))
+            }
             Ops::OneWayCallNew => {
                 // pop in reverse order!
                 let method = stack.pop_blob();
@@ -395,6 +401,89 @@ fn eval(ops_bytes: OpsBytes) {
             Ops::IsController => {
                 let data = stack.pop_blob();
                 stack.push_int(api::is_controller(&data));
+            }
+            Ops::CyclesBurn128 => {
+                let amount_low = stack.pop_int64();
+                let amount_high = stack.pop_int64();
+                stack.push_blob(api::cycles_burn128(amount_high, amount_low))
+            }
+            Ops::BlobLength => {
+                let data = stack.pop_blob();
+                stack.push_int(data.len() as u32);
+            }
+            Ops::PushEqualBytes => {
+                let length = stack.pop_int();
+                let byte = stack.pop_int();
+                let data = vec![byte as u8; length as usize];
+                stack.push_blob(data);
+            }
+            Ops::InReplicatedExecution => stack.push_int(api::in_replicated_execution()),
+            Ops::CallWithBestEffortResponse => api::call_with_best_effort_response(stack.pop_int()),
+            Ops::MsgDeadline => stack.push_int64(api::msg_deadline()),
+            Ops::MemorySizeIsAtLeast => {
+                #[cfg(target_arch = "wasm32")]
+                let current_memory_size = || {
+                    let wasm_page_size = wee_alloc::PAGE_SIZE.0;
+                    core::arch::wasm32::memory_size::<0>() * wasm_page_size
+                };
+
+                #[cfg(not(target_arch = "wasm32"))]
+                let current_memory_size = || usize::MAX;
+
+                let target_memory_size = stack.pop_int64() as usize;
+                let mut a = vec![];
+                loop {
+                    if current_memory_size() > target_memory_size {
+                        break;
+                    }
+                    // Allocate a megabyte more.
+                    a.push(vec![13u8; 1024 * 1024]);
+                }
+                std::hint::black_box(a);
+            }
+            Ops::CostCall => {
+                let payload_size = stack.pop_int64();
+                let method_name_size = stack.pop_int64();
+                stack.push_blob(api::cost_call(method_name_size, payload_size));
+            }
+            Ops::CostCreateCanister => stack.push_blob(api::cost_create_canister()),
+            Ops::CostHttpRequest => {
+                let max_res_bytes = stack.pop_int64();
+                let request_size = stack.pop_int64();
+                stack.push_blob(api::cost_http_request(request_size, max_res_bytes));
+            }
+            Ops::CostSignWithEcdsa => {
+                let ecdsa_curve = stack.pop_int();
+                let key_name = stack.pop_blob();
+                match api::cost_sign_with_ecdsa(&key_name, ecdsa_curve) {
+                    Ok(bytes) => stack.push_blob(bytes),
+                    Err(err_code) => api::trap_with(&format!(
+                        "ic0.cost_sign_with_ecdsa failed with error code {}",
+                        err_code
+                    )),
+                }
+            }
+            Ops::CostSignWithSchnorr => {
+                let algorithm = stack.pop_int();
+                let key_name = stack.pop_blob();
+                match api::cost_sign_with_schnorr(&key_name, algorithm) {
+                    Ok(bytes) => stack.push_blob(bytes),
+                    Err(err_code) => api::trap_with(&format!(
+                        "ic0.cost_sign_with_schnorr failed with error code {}",
+                        err_code
+                    )),
+                }
+            }
+            Ops::CostVetkdDeriveEncryptedKey => {
+                let vetkd_curve = stack.pop_int();
+                let key_name = stack.pop_blob();
+                match api::cost_vetkd_derive_encrypted_key(&key_name, vetkd_curve) {
+                    Ok(bytes) => stack.push_blob(bytes),
+                    Err(err_code) => api::trap_with(&format!(
+                        "ic0.cost_vetkd_derive_encrypted_key failed with error code {}",
+                        err_code
+                    )),
+                }
             }
         }
     }
@@ -435,6 +524,7 @@ fn pre_upgrade() {
     eval(&get_pre_upgrade());
 }
 
+#[cfg(feature = "heartbeat")]
 #[export_name = "canister_heartbeat"]
 fn heartbeat() {
     setup();
@@ -466,6 +556,9 @@ lazy_static! {
 fn set_global(data: Vec<u8>) {
     *GLOBAL.lock().unwrap() = data;
 }
+fn append_global(mut data: Vec<u8>) {
+    GLOBAL.lock().unwrap().append(&mut data);
+}
 fn get_global() -> Vec<u8> {
     GLOBAL.lock().unwrap().clone()
 }
@@ -493,6 +586,7 @@ lazy_static! {
 fn set_heartbeat(data: Vec<u8>) {
     *HEARTBEAT.lock().unwrap() = data;
 }
+#[cfg(feature = "heartbeat")]
 fn get_heartbeat() -> Vec<u8> {
     HEARTBEAT.lock().unwrap().clone()
 }
