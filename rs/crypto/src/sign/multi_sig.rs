@@ -206,8 +206,8 @@ impl MultiSignerInternal {
         let algorithm_id = AlgorithmId::from(pk_proto.algorithm);
         let csp_pk = CspPublicKey::try_from(pk_proto)?;
         let message_bytes = message.as_signed_bytes();
-        let key_id = KeyId::try_from(&csp_pk)?;
-        let csp_sig = csp_signer.sign(algorithm_id, &message_bytes, key_id)?;
+        let key_id = KeyId::from(&csp_pk);
+        let csp_sig = csp_signer.sign(algorithm_id, message_bytes, key_id)?;
 
         Ok(IndividualMultiSigOf::new(IndividualMultiSig(
             csp_sig.as_ref().to_vec(),

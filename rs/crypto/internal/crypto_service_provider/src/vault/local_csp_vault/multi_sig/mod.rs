@@ -24,11 +24,11 @@ impl<R: Rng + CryptoRng, S: SecretKeyStore, C: SecretKeyStore, P: PublicKeyStore
     fn multi_sign(
         &self,
         algorithm_id: AlgorithmId,
-        message: &[u8],
+        message: Vec<u8>,
         key_id: KeyId,
     ) -> Result<CspSignature, CspMultiSignatureError> {
         let start_time = self.metrics.now();
-        let result = self.multi_sign_internal(algorithm_id, message, key_id);
+        let result = self.multi_sign_internal(algorithm_id, &message[..], key_id);
         self.metrics.observe_duration_seconds(
             MetricsDomain::MultiSignature,
             MetricsScope::Local,
@@ -62,7 +62,7 @@ impl<R: Rng + CryptoRng, S: SecretKeyStore, C: SecretKeyStore, P: PublicKeyStore
         &self,
     ) -> Result<(CspPublicKey, CspPop), CspMultiSignatureKeygenError> {
         let (secret_key, pk_and_pop) = self.gen_multi_bls12381_keypair_with_pop()?;
-        let key_id = KeyId::try_from(&pk_and_pop.0)?;
+        let key_id = KeyId::from(&pk_and_pop.0);
         let committee_public_key_proto = committee_signing_pk_to_proto(pk_and_pop.clone());
         let valid_public_key = validate_committee_signing_public_key(committee_public_key_proto)?;
         self.store_committee_signing_key_pair(key_id, secret_key, valid_public_key.get().clone())?;
@@ -129,10 +129,10 @@ impl<R: Rng + CryptoRng, S: SecretKeyStore, C: SecretKeyStore, P: PublicKeyStore
                 key_id,
             })?;
 
-        let result = match algorithm_id {
+        match algorithm_id {
             AlgorithmId::MultiBls12_381 => match &secret_key {
                 CspSecretKey::MultiBls12_381(key) => {
-                    let sig = multi_bls12381::sign(message, key.clone());
+                    let sig = multi_bls12381::sign(message, key);
                     Ok(CspSignature::MultiBls12_381(
                         MultiBls12_381_Signature::Individual(sig),
                     ))
@@ -145,8 +145,7 @@ impl<R: Rng + CryptoRng, S: SecretKeyStore, C: SecretKeyStore, P: PublicKeyStore
             _ => Err(CspMultiSignatureError::UnsupportedAlgorithm {
                 algorithm: algorithm_id,
             }),
-        };
-        result
+        }
     }
 
     fn gen_multi_bls12381_keypair_with_pop(
@@ -156,7 +155,7 @@ impl<R: Rng + CryptoRng, S: SecretKeyStore, C: SecretKeyStore, P: PublicKeyStore
         let pk = CspPublicKey::MultiBls12_381(pk_bytes);
         let sk = CspSecretKey::MultiBls12_381(sk_bytes.clone());
 
-        let pop_bytes = multi_bls12381::create_pop(pk_bytes, sk_bytes).map_err(|e| match e {
+        let pop_bytes = multi_bls12381::create_pop(&pk_bytes, &sk_bytes).map_err(|e| match e {
             CryptoError::MalformedPublicKey {
                 algorithm,
                 key_bytes,
